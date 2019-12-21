@@ -20,7 +20,7 @@ This driver is developed based on [ROS velodyne driver](http://wiki.ros.org/velo
 
 **Parameters**
 
-`device_ip` (`string`, `default: 192.168.1.201`)
+`device_ip` (`string`)
 
 By default, the IP address of the device is 192.168.1.201.
 
@@ -35,20 +35,9 @@ This is the topic to save, don't save point cloud or range image!!!
 
 **Parameters**
 
-`min_range` (`double`, `0.5`)
-
-`max_range` (`double`, `100.0`)
-
-Points outside this range will be NaN in published point cloud if `organized=True`.
-Otherwise, they will be removed.
-
 `image_width` (`int`, `1024`)
 
 Width of the published image.
-
-`full_sweep` (`bool`, `false`)
-
-Whether to publish a full sweep or not.
 
 `organized` (`bool`, `true`)
 
@@ -63,7 +52,7 @@ Will be used as namespace for all nodes and messages.
 `image` (`sensor_msgs/Image`)
 
 The range image is encoded as a CV_F32C3 image, with channels (Range, Intensity, Azimuth)
-row 0 ~ 15 in the image correspond to lasers from top (15deg) to bottom (-15deg).
+row 0 ~ 15 in the image correspond to laser beams from top (15deg) to bottom (-15deg).
 
 pixels in each row just contain those 3 bytes.
 
@@ -91,12 +80,4 @@ A point cloud, where invalid points are filled with NaNs if organized and remove
 
 **Node**
 
-Run full driver
-```
-roslaunch velodyne_puck run.launch driver:=true device_ip:=192.168.1.201
-```
-
-Run decoder only
-```
-roslaunch velodyne_puck run.launch driver:=false
-```
+See launch files.

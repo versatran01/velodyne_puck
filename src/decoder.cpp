@@ -31,9 +31,6 @@ enum Index { RANGE = 0, INTENSITY = 1, AZIMUTH = 2, NOISE = 3 };
 
 class Decoder {
  public:
-  /// Number of channels for image data
-  static constexpr int kChannels = 2;  // (range [m], intensity)
-
   explicit Decoder(const ros::NodeHandle& pnh);
 
   Decoder(const Decoder&) = delete;
@@ -233,7 +230,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   cinfo_msg->header = header;
   cinfo_msg->height = image_msg->height;
   cinfo_msg->width = image_msg->width;
-  cinfo_msg->distortion_model = "VLP16";
+  cinfo_msg->distortion_model = "VLP16 Puck Lite";
   cinfo_msg->P[0] = kFiringCycleNs;  // delta time between two measurements
 
   // D = [altitude, azimuth]
@@ -277,8 +274,6 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
 }
 
 void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
-  config.min_range = std::min(config.min_range, config.max_range);
-
   if (config.full_sweep) {
     config.full_sweep = false;
     ROS_WARN("Full sweep mode not supported. Use the following image width");
@@ -288,12 +283,8 @@ void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
   config.image_width /= kSequencesPerPacket;
   config.image_width *= kSequencesPerPacket;
 
-  ROS_INFO(
-      "Reconfigure Request: min_range: %f, max_range: %f, image_width: %d, "
-      "organized: %s, full_sweep: %s",
-      config.min_range, config.max_range, config.image_width,
-      config.organized ? "True" : "False",
-      config.full_sweep ? "True" : "False");
+  ROS_INFO("Reconfigure Request: image_width: %d, organized: %s",
+           config.image_width, config.organized ? "True" : "False");
 
   config_ = config;
   Reset();
@@ -354,7 +345,7 @@ CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
         const auto z = d * sin_phi;
 
         p.x = x;
-        p.y = -y;
+        p.y = -y;  // azimuth is clock wise
         p.z = z;
         p.intensity = data[INTENSITY];
 
