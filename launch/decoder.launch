@@ -2,8 +2,7 @@
   <arg name="pkg" value="velodyne_puck"/>
   <arg name="ns" default="velodyne"/>
   <arg name="cloud" default="cloud"/>
-
-  <arg name="frame_id" default="$(arg ns)"/>
+  <arg name="frame_id" default="lidar"/>
   <arg name="image_width" default="1800"/>
   <arg name="organized" default="true"/>
 
