@@ -26,6 +26,8 @@ using CloudT = pcl::PointCloud<PointT>;
 CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
                bool organized);
 
+double ComputeDeltaAzimuth(const std::vector<double>& azimuths);
+
 /// Used for indexing into packet and image, (NOISE not used now)
 enum Index { RANGE = 0, INTENSITY = 1, AZIMUTH = 2, NOISE = 3 };
 
@@ -234,7 +236,8 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   cinfo_msg->height = image_msg->height;
   cinfo_msg->width = image_msg->width;
   cinfo_msg->distortion_model = "VLP16";
-  cinfo_msg->P[0] = kFiringCycleNs;  // delta time between two measurements
+  cinfo_msg->K[0] = kFiringCycleNs;  // delta time between two measurements
+  cinfo_msg->K[1] = ComputeDeltaAzimuth(azimuths_);  // delta azimuth
 
   // D = [altitude, azimuth]
   cinfo_msg->D = elevations_;
@@ -372,6 +375,15 @@ CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
   }
 
   return cloud;
+}
+double ComputeDeltaAzimuth(const std::vector<double>& azimuths) {
+  // Compute delta azimuth
+  double sum_azimuth = 0.0;
+  for (int i = 1; i < azimuths.size(); ++i) {
+    auto diff = azimuths[i] - azimuths[i - 1];
+    sum_azimuth += diff < 0 ? diff + kTau : diff;
+  }
+  return sum_azimuth / (azimuths.size() - 1);
 }
 
 }  // namespace velodyne_puck

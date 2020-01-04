@@ -3,7 +3,7 @@
 
   <arg name="frame_id" default="velodyne"/>
   <arg name="full_sweep" default="True"/>
-  <arg name="image_width" default="1024"/>
+  <arg name="image_width" default="3636"/>
   <arg name="organized" default="true"/>
   <arg name="min_range" default="1.0"/>
   <arg name="max_range" default="100.0"/>
