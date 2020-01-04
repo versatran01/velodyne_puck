@@ -1,0 +1,24 @@
+<launch>
+  <arg name="pkg" value="velodyne_puck"/>
+  <arg name="ns_in" default="/velodyne"/>
+  <arg name="ns_out" default="$(arg ns_in)"/>
+  <arg name="frame_id" default="lidar"/>
+  <arg name="image_width" default="3636"/>
+  <arg name="organized" default="true"/>
+
+  <node pkg="$(arg pkg)" type="$(arg pkg)_decoder" name="$(arg pkg)_decoder" output="screen" ns="$(arg ns_in)">
+    <!-- params -->
+    <param name="frame_id" type="string" value="$(arg frame_id)"/>
+    <param name="image_width" type="int" value="$(arg image_width)"/>
+    <param name="organized" type="bool" value="$(arg organized)"/>
+
+    <!-- input -->
+    <remap from="~packet" to="packet"/>
+
+    <!-- output -->
+    <remap from="~cloud" to="$(arg ns_out)/cloud"/>
+    <remap from="~image" to="$(arg ns_out)/image"/>
+    <remap from="~camera_info" to="$(arg ns_out)/camera_info"/>
+  </node>
+
+</launch>
