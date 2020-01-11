@@ -19,21 +19,24 @@ namespace velodyne_puck {
 using namespace sensor_msgs;
 using namespace velodyne_msgs;
 
-using PointT = pcl::PointXYZI;
-using CloudT = pcl::PointCloud<PointT>;
+using Point = pcl::PointXYZI;
+using Cloud = pcl::PointCloud<Point>;
 
 /// Convert image and camera_info to point cloud
-CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
-               bool organized);
-
-double ComputeDeltaAzimuth(const std::vector<double>& azimuths);
+Cloud ToCloud(const ImageConstPtr& image_msg,
+              const CameraInfo& cinfo_msg,
+              bool organized, bool high_prec);
+std::vector<Point> ToCloud(const cv::Mat& image,
+                           const std::vector<double>& elevations);
+std::vector<Point> ToCloud(const cv::Mat& image,
+                           const std::vector<double>& elevations,
+                           const std::vector<double>& azimuths);
 
 /// Used for indexing into packet and image, (NOISE not used now)
 enum Index { RANGE = 0, INTENSITY = 1, AZIMUTH = 2, NOISE = 3 };
 
 class Decoder {
  public:
-
   explicit Decoder(const ros::NodeHandle& pnh);
 
   Decoder(const Decoder&) = delete;
@@ -235,7 +238,6 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   cinfo_msg->width = image_msg->width;
   cinfo_msg->distortion_model = "VLP16";
   cinfo_msg->K[0] = kFiringCycleNs;  // delta time between two measurements
-  cinfo_msg->K[1] = ComputeDeltaAzimuth(azimuths_);  // delta azimuth
 
   // D = [altitude, azimuth]
   cinfo_msg->D = elevations_;
@@ -288,7 +290,8 @@ void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
   config.image_width *= kSequencesPerPacket;
 
   ROS_INFO("Reconfigure Request: image_width: %d, organized: %s",
-           config.image_width, config.organized ? "True" : "False");
+           config.image_width,
+           config.organized ? "True" : "False");
 
   config_ = config;
   Reset();
@@ -308,17 +311,18 @@ void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
 
 void Decoder::Reset() {
   curr_col_ = 0;
-  image_ = cv::Mat(kFiringsPerSequence, config_.image_width, CV_32FC3,
-                   cv::Scalar(kNaNF));
+  image_ = cv::Mat(
+      kFiringsPerSequence, config_.image_width, CV_32FC3, cv::Scalar(kNaNF));
   azimuths_.clear();
   azimuths_.resize(config_.image_width, kNaND);
   timestamps_.clear();
   timestamps_.resize(config_.image_width, 0);
 }
 
-CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
-               bool organized) {
-  CloudT cloud;
+Cloud ToCloud(const ImageConstPtr& image_msg,
+              const CameraInfo& cinfo_msg,
+              bool organized, bool high_prec) {
+  Cloud cloud;
   const auto image = cv_bridge::toCvShare(image_msg)->image;
   const auto& elevations = cinfo_msg.D;  // might be unsafe
 
@@ -335,7 +339,7 @@ CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
     for (int c = 0; c < image.cols; ++c) {
       const cv::Vec3f& data = row_ptr[c];
 
-      PointT p;
+      Point p;
       if (std::isnan(data[RANGE])) {
         if (organized) {
           p.x = p.y = p.z = p.intensity = kNaNF;
@@ -367,15 +371,6 @@ CloudT ToCloud(const ImageConstPtr& image_msg, const CameraInfo& cinfo_msg,
   }
 
   return cloud;
-}
-double ComputeDeltaAzimuth(const std::vector<double>& azimuths) {
-  // Compute delta azimuth
-  double sum_azimuth = 0.0;
-  for (int i = 1; i < azimuths.size(); ++i) {
-    auto diff = azimuths[i] - azimuths[i - 1];
-    sum_azimuth += diff < 0 ? diff + kTau : diff;
-  }
-  return sum_azimuth / (azimuths.size() - 1);
 }
 
 }  // namespace velodyne_puck
