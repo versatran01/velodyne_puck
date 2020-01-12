@@ -3,6 +3,7 @@ project(velodyne_puck)
 
 set(CMAKE_CXX_STANDARD 11)
 
+find_package(OpenMP)
 find_package(
   catkin REQUIRED
   COMPONENTS roscpp
@@ -28,5 +29,9 @@ add_executable(${PROJECT_NAME}_decoder src/decoder.cpp)
 target_include_directories(${PROJECT_NAME}_decoder PUBLIC ${catkin_INCLUDE_DIRS}
                                                           src)
 target_link_libraries(${PROJECT_NAME}_decoder PUBLIC ${catkin_LIBRARIES})
+
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(${PROJECT_NAME}_decoder PUBLIC OpenMP::OpenMP_CXX)
+endif()
 
 add_dependencies(${PROJECT_NAME}_driver ${PROJECT_NAME}_gencfg)

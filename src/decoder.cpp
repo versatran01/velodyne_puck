@@ -22,18 +22,110 @@ using namespace velodyne_msgs;
 using Point = pcl::PointXYZI;
 using Cloud = pcl::PointCloud<Point>;
 
-/// Convert image and camera_info to point cloud
-Cloud ToCloud(const ImageConstPtr& image_msg,
-              const CameraInfo& cinfo_msg,
-              bool organized, bool high_prec);
-std::vector<Point> ToCloud(const cv::Mat& image,
-                           const std::vector<double>& elevations);
-std::vector<Point> ToCloud(const cv::Mat& image,
-                           const std::vector<double>& elevations,
-                           const std::vector<double>& azimuths);
+struct SinCos {
+  SinCos() = default;
+  SinCos(double rad) : sin{std::sin(rad)}, cos{std::cos(rad)} {}
+  double sin, cos;
+};
 
 /// Used for indexing into packet and image, (NOISE not used now)
 enum Index { RANGE = 0, INTENSITY = 1, AZIMUTH = 2, NOISE = 3 };
+
+template <typename Iter>
+std::vector<SinCos> PrecomputeSinCos(Iter first, Iter last) {
+  std::vector<SinCos> sc;
+  sc.reserve(std::distance(first, last));
+  while (first != last) sc.emplace_back(*first++);
+  return sc;
+}
+
+inline void PolarToCart(Point& p,
+                        const SinCos& ev,
+                        const SinCos& az,
+                        double r) {
+  p.x = r * ev.cos * az.cos;
+  p.y = -r * ev.cos * az.sin;
+  p.z = r * ev.sin;
+}
+
+/// Convert image and camera_info to point cloud
+Cloud ToCloud(const ImageConstPtr& image_msg,
+              const CameraInfo& cinfo_msg,
+              bool high_prec);
+
+/// High precision mode
+Cloud::VectorType ToCloud(const cv::Mat& image,
+                          const std::vector<SinCos>& elevations) {
+  Cloud::VectorType points;
+  points.reserve(image.total());
+
+  for (int r = 0; r < image.rows; ++r) {
+    const auto* const row_ptr = image.ptr<cv::Vec3f>(r);
+    for (int c = 0; c < image.cols; ++c) {
+      const cv::Vec3f& data = row_ptr[c];
+      const auto theta = data[AZIMUTH];
+
+      Point p;
+      if (std::isnan(data[RANGE])) {
+        p.x = p.y = p.z = p.intensity = kNaNF;
+      } else {
+        PolarToCart(p, elevations[r], {theta}, data[RANGE]);
+        p.intensity = data[INTENSITY];
+      }
+      points.push_back(p);
+    }  // c
+  }    // r
+
+  return points;
+}
+
+/// Low precision mode
+Cloud::VectorType ToCloud(const cv::Mat& image,
+                          const std::vector<SinCos>& elevations,
+                          const std::vector<SinCos>& azimuths) {
+  Cloud::VectorType points;
+  points.reserve(image.total());
+
+  for (int r = 0; r < image.rows; ++r) {
+    const auto* const row_ptr = image.ptr<cv::Vec3f>(r);
+    for (int c = 0; c < image.cols; ++c) {
+      const cv::Vec3f& data = row_ptr[c];
+      Point p;
+      if (std::isnan(data[RANGE])) {
+        p.x = p.y = p.z = p.intensity = kNaNF;
+      } else {
+        PolarToCart(p, elevations[r], azimuths[c], data[RANGE]);
+        p.intensity = data[INTENSITY];
+      }
+      points.push_back(p);
+    }  // c
+  }    // r
+
+  return points;
+}
+
+Cloud ToCloud(const ImageConstPtr& image_msg,
+              const CameraInfo& cinfo_msg,
+              bool high_prec) {
+  Cloud cloud;
+  const auto image = cv_bridge::toCvShare(image_msg)->image;
+  const auto elevations =
+      PrecomputeSinCos(cinfo_msg.D.cbegin(), cinfo_msg.D.cbegin() + image.rows);
+
+  if (high_prec) {
+    cloud.points = std::move(ToCloud(image, elevations));
+  } else {
+    const auto azimuths =
+        PrecomputeSinCos(cinfo_msg.D.cbegin() + image.rows, cinfo_msg.D.cend());
+    cloud.points = std::move(ToCloud(image, elevations, azimuths));
+  }
+
+  cloud.header = pcl_conversions::toPCL(image_msg->header);
+  cloud.width = image.cols;
+  cloud.height = image.rows;
+
+  return cloud;
+}
 
 class Decoder {
  public:
@@ -241,16 +333,20 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
 
   // D = [altitude, azimuth]
   cinfo_msg->D = elevations_;
-  cinfo_msg->D.insert(cinfo_msg->D.end(), azimuths_.begin(), azimuths_.end());
+  cinfo_msg->D.insert(cinfo_msg->D.end(), azimuths_.cbegin(), azimuths_.cend());
 
   // Publish on demand
   if (camera_pub_.getNumSubscribers() > 0) {
     camera_pub_.publish(image_msg, cinfo_msg);
   }
 
-  if (cloud_pub_.getNumSubscribers() > 0) {
-    cloud_pub_.publish(ToCloud(image_msg, *cinfo_msg, config_.organized));
+  //  if (cloud_pub_.getNumSubscribers() > 0 ) {
+  {
+    const auto start = ros::Time::now();
+    cloud_pub_.publish(ToCloud(image_msg, *cinfo_msg, false));
+    ROS_INFO("high prec: %f", (ros::Time::now() - start).toSec());
   }
+  //  }
 
   if (range_pub_.getNumSubscribers() > 0 ||
       intensity_pub_.getNumSubscribers() > 0) {
@@ -280,18 +376,10 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
 }
 
 void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
-  if (config.full_sweep) {
-    config.full_sweep = false;
-    ROS_WARN("Full sweep mode not supported. Use the following image width");
-    ROS_WARN("5 rpm - 3600, 10 rpm - 1800, 20 rpm - 900");
-  }
-
   config.image_width /= kSequencesPerPacket;
   config.image_width *= kSequencesPerPacket;
 
-  ROS_INFO("Reconfigure Request: image_width: %d, organized: %s",
-           config.image_width,
-           config.organized ? "True" : "False");
+  ROS_INFO("Reconfigure Request: image_width: %d", config.image_width);
 
   config_ = config;
   Reset();
@@ -317,60 +405,6 @@ void Decoder::Reset() {
   azimuths_.resize(config_.image_width, kNaND);
   timestamps_.clear();
   timestamps_.resize(config_.image_width, 0);
-}
-
-Cloud ToCloud(const ImageConstPtr& image_msg,
-              const CameraInfo& cinfo_msg,
-              bool organized, bool high_prec) {
-  Cloud cloud;
-  const auto image = cv_bridge::toCvShare(image_msg)->image;
-  const auto& elevations = cinfo_msg.D;  // might be unsafe
-
-  cloud.header = pcl_conversions::toPCL(image_msg->header);
-  cloud.reserve(image.total());
-
-  for (int r = 0; r < image.rows; ++r) {
-    const auto* const row_ptr = image.ptr<cv::Vec3f>(r);
-    // Because image row 0 is the highest laser point
-    const auto phi = elevations[r];
-    const auto cos_phi = std::cos(phi);
-    const auto sin_phi = std::sin(phi);
-
-    for (int c = 0; c < image.cols; ++c) {
-      const cv::Vec3f& data = row_ptr[c];
-
-      Point p;
-      if (std::isnan(data[RANGE])) {
-        if (organized) {
-          p.x = p.y = p.z = p.intensity = kNaNF;
-          cloud.points.push_back(p);
-        }
-      } else {
-        const auto d = data[RANGE];
-        const auto theta = data[AZIMUTH];
-        const auto x = d * cos_phi * std::cos(theta);
-        const auto y = d * cos_phi * std::sin(theta);
-        const auto z = d * sin_phi;
-
-        p.x = x;
-        p.y = -y;  // azimuth is clock wise
-        p.z = z;
-        p.intensity = data[INTENSITY];
-
-        cloud.points.push_back(p);
-      }
-    }
-  }
-
-  if (organized) {
-    cloud.width = image.cols;
-    cloud.height = image.rows;
-  } else {
-    cloud.width = cloud.size();
-    cloud.height = 1;
-  }
-
-  return cloud;
 }
 
 }  // namespace velodyne_puck
