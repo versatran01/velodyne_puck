@@ -26,6 +26,7 @@ puck.cflags
 puck.cflags
 puck.cxxflags
 puck.cxxflags
+src/cloud.h
 src/constants.h
 src/constants.h
 src/constants.h

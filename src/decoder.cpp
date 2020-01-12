@@ -1,14 +1,11 @@
+#include "cloud.h"
 #include "constants.h"
 
-#include <cv_bridge/cv_bridge.h>
 #include <dynamic_reconfigure/server.h>
 #include <image_transport/camera_publisher.h>
 #include <image_transport/image_transport.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/point_cloud.h>
 
-#include <sensor_msgs/CameraInfo.h>
-#include <sensor_msgs/Image.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <velodyne_msgs/VelodynePacket.h>
 #include <velodyne_msgs/VelodyneScan.h>
@@ -19,125 +16,17 @@ namespace velodyne_puck {
 using namespace sensor_msgs;
 using namespace velodyne_msgs;
 
-using Point = pcl::PointXYZI;
-using Cloud = pcl::PointCloud<Point>;
-
-struct SinCos {
-  SinCos() = default;
-  SinCos(double rad) : sin{std::sin(rad)}, cos{std::cos(rad)} {}
-  double sin, cos;
-};
-
-/// Used for indexing into packet and image, (NOISE not used now)
-enum Index { RANGE = 0, INTENSITY = 1, AZIMUTH = 2, NOISE = 3 };
-
-template <typename Iter>
-std::vector<SinCos> PrecomputeSinCos(Iter first, Iter last) {
-  std::vector<SinCos> sc;
-  sc.reserve(std::distance(first, last));
-  while (first != last) sc.emplace_back(*first++);
-  return sc;
-}
-
-inline void PolarToCart(Point& p,
-                        const SinCos& ev,
-                        const SinCos& az,
-                        double r) {
-  p.x = r * ev.cos * az.cos;
-  p.y = -r * ev.cos * az.sin;
-  p.z = r * ev.sin;
-}
-
-/// Convert image and camera_info to point cloud
-Cloud ToCloud(const ImageConstPtr& image_msg,
-              const CameraInfo& cinfo_msg,
-              bool high_prec);
-
-/// High precision mode
-Cloud::VectorType ToCloud(const cv::Mat& image,
-                          const std::vector<SinCos>& elevations) {
-  Cloud::VectorType points;
-  points.reserve(image.total());
-
-  for (int r = 0; r < image.rows; ++r) {
-    const auto* const row_ptr = image.ptr<cv::Vec3f>(r);
-    for (int c = 0; c < image.cols; ++c) {
-      const cv::Vec3f& data = row_ptr[c];
-      const auto theta = data[AZIMUTH];
-
-      Point p;
-      if (std::isnan(data[RANGE])) {
-        p.x = p.y = p.z = p.intensity = kNaNF;
-      } else {
-        PolarToCart(p, elevations[r], {theta}, data[RANGE]);
-        p.intensity = data[INTENSITY];
-      }
-      points.push_back(p);
-    }  // c
-  }    // r
-
-  return points;
-}
-
-/// Low precision mode
-Cloud::VectorType ToCloud(const cv::Mat& image,
-                          const std::vector<SinCos>& elevations,
-                          const std::vector<SinCos>& azimuths) {
-  Cloud::VectorType points;
-  points.reserve(image.total());
-
-  for (int r = 0; r < image.rows; ++r) {
-    const auto* const row_ptr = image.ptr<cv::Vec3f>(r);
-    for (int c = 0; c < image.cols; ++c) {
-      const cv::Vec3f& data = row_ptr[c];
-      Point p;
-      if (std::isnan(data[RANGE])) {
-        p.x = p.y = p.z = p.intensity = kNaNF;
-      } else {
-        PolarToCart(p, elevations[r], azimuths[c], data[RANGE]);
-        p.intensity = data[INTENSITY];
-      }
-      points.push_back(p);
-    }  // c
-  }    // r
-
-  return points;
-}
-
-Cloud ToCloud(const ImageConstPtr& image_msg,
-              const CameraInfo& cinfo_msg,
-              bool high_prec) {
-  Cloud cloud;
-  const auto image = cv_bridge::toCvShare(image_msg)->image;
-  const auto elevations =
-      PrecomputeSinCos(cinfo_msg.D.cbegin(), cinfo_msg.D.cbegin() + image.rows);
-
-  if (high_prec) {
-    cloud.points = std::move(ToCloud(image, elevations));
-  } else {
-    const auto azimuths =
-        PrecomputeSinCos(cinfo_msg.D.cbegin() + image.rows, cinfo_msg.D.cend());
-    cloud.points = std::move(ToCloud(image, elevations, azimuths));
-  }
-
-  cloud.header = pcl_conversions::toPCL(image_msg->header);
-  cloud.width = image.cols;
-  cloud.height = image.rows;
-
-  return cloud;
-}
-
 class Decoder {
- public:
-  explicit Decoder(const ros::NodeHandle& pnh);
+public:
+  explicit Decoder(const ros::NodeHandle &pnh);
 
-  Decoder(const Decoder&) = delete;
-  Decoder operator=(const Decoder&) = delete;
+  Decoder(const Decoder &) = delete;
+  Decoder operator=(const Decoder &) = delete;
 
-  void PacketCb(const VelodynePacketConstPtr& packet_msg);
-  void ConfigCb(VelodynePuckConfig& config, int level);
+  void PacketCb(const VelodynePacketConstPtr &packet_msg);
+  void ConfigCb(VelodynePuckConfig &config, int level);
 
- private:
+private:
   /// All of these uses laser index from velodyne which is interleaved
 
   /// 9.3.1.3 Data Point
@@ -153,7 +42,7 @@ class Decoder {
   /// A firing sequence occurs when all the lasers in a sensor are fired. There
   /// are 16 firings per cycle for VLP-16
   struct FiringSequence {
-    DataPoint points[kFiringsPerSequence];  // 16
+    DataPoint points[kFiringsPerSequence]; // 16
   } __attribute__((packed));
   static_assert(sizeof(FiringSequence) == 48, "sizeof(FiringSequence) != 48");
 
@@ -167,13 +56,13 @@ class Decoder {
   /// data blocks.
   struct DataBlock {
     uint16_t flag;
-    uint16_t azimuth;                              // [0, 35999]
-    FiringSequence sequences[kSequencesPerBlock];  // 2
+    uint16_t azimuth;                             // [0, 35999]
+    FiringSequence sequences[kSequencesPerBlock]; // 2
   } __attribute__((packed));
   static_assert(sizeof(DataBlock) == 100, "sizeof(DataBlock) != 100");
 
   struct Packet {
-    DataBlock blocks[kBlocksPerPacket];  // 12
+    DataBlock blocks[kBlocksPerPacket]; // 12
     /// The four-byte time stamp is a 32-bit unsigned integer marking the moment
     /// of the first data point in the first firing sequcne of the first data
     /// block. The time stamp’s value is the number of microseconds elapsed
@@ -184,10 +73,10 @@ class Decoder {
   static_assert(sizeof(Packet) == sizeof(velodyne_msgs::VelodynePacket().data),
                 "sizeof(Packet) != 1206");
 
-  void DecodeAndFill(const Packet* const packet_buf, uint64_t time);
+  void DecodeAndFill(const Packet *const packet_buf, uint64_t time);
 
- private:
-  bool CheckFactoryBytes(const Packet* const packet);
+private:
+  bool CheckFactoryBytes(const Packet *const packet);
   void Reset();
 
   // ROS related parameters
@@ -209,7 +98,7 @@ class Decoder {
   std::vector<double> elevations_;
 };
 
-Decoder::Decoder(const ros::NodeHandle& pnh)
+Decoder::Decoder(const ros::NodeHandle &pnh)
     : pnh_(pnh), it_(pnh), cfg_server_(pnh) {
   pnh_.param<std::string>("frame_id", frame_id_, "velodyne");
   ROS_INFO("Velodyne frame_id: %s", frame_id_.c_str());
@@ -221,15 +110,14 @@ Decoder::Decoder(const ros::NodeHandle& pnh)
   }
 }
 
-bool Decoder::CheckFactoryBytes(const Packet* const packet_buf) {
+bool Decoder::CheckFactoryBytes(const Packet *const packet_buf) {
   // Check return mode and product id, for now just die
   const auto return_mode = packet_buf->factory[0];
 
   if (!(return_mode == 55 || return_mode == 56)) {
-    ROS_ERROR(
-        "return mode must be Strongest (55) or Last Return (56), "
-        "instead got (%u)",
-        return_mode);
+    ROS_ERROR("return mode must be Strongest (55) or Last Return (56), "
+              "instead got (%u)",
+              return_mode);
     return false;
   }
 
@@ -243,7 +131,7 @@ bool Decoder::CheckFactoryBytes(const Packet* const packet_buf) {
   return true;
 }
 
-void Decoder::DecodeAndFill(const Packet* const packet_buf, uint64_t time) {
+void Decoder::DecodeAndFill(const Packet *const packet_buf, uint64_t time) {
   if (!CheckFactoryBytes(packet_buf)) {
     ros::shutdown();
   }
@@ -259,9 +147,9 @@ void Decoder::DecodeAndFill(const Packet* const packet_buf, uint64_t time) {
 
   // For each data block, 12 total
   for (int iblk = 0; iblk < kBlocksPerPacket; ++iblk) {
-    const auto& block = packet_buf->blocks[iblk];
-    const auto raw_azimuth = block.azimuth;         // nominal azimuth [0,35999]
-    const auto azimuth = Raw2Azimuth(raw_azimuth);  // nominal azimuth [0, 2pi)
+    const auto &block = packet_buf->blocks[iblk];
+    const auto raw_azimuth = block.azimuth;        // nominal azimuth [0,35999]
+    const auto azimuth = Raw2Azimuth(raw_azimuth); // nominal azimuth [0, 2pi)
 
     ROS_WARN_STREAM_COND(raw_azimuth > kMaxRawAzimuth,
                          "Invalid raw azimuth: " << raw_azimuth);
@@ -270,18 +158,19 @@ void Decoder::DecodeAndFill(const Packet* const packet_buf, uint64_t time) {
     float azimuth_gap{0};
     if (iblk == kBlocksPerPacket - 1) {
       // Last block, 12th
-      const auto& prev_block = packet_buf->blocks[iblk - 1];
+      const auto &prev_block = packet_buf->blocks[iblk - 1];
       const auto prev_azimuth = Raw2Azimuth(prev_block.azimuth);
       azimuth_gap = azimuth - prev_azimuth;
     } else {
       // First 11 blocks
-      const auto& next_block = packet_buf->blocks[iblk + 1];
+      const auto &next_block = packet_buf->blocks[iblk + 1];
       const auto next_azimuth = Raw2Azimuth(next_block.azimuth);
       azimuth_gap = next_azimuth - azimuth;
     }
 
     // Adjust for azimuth rollover from 2pi to 0
-    if (azimuth_gap < 0) azimuth_gap += kTau;
+    if (azimuth_gap < 0)
+      azimuth_gap += kTau;
     const auto half_azimuth_gap = azimuth_gap / 2;
 
     // for each firing sequence in the data block, 2
@@ -290,26 +179,26 @@ void Decoder::DecodeAndFill(const Packet* const packet_buf, uint64_t time) {
       timestamps_[curr_col_] = time + col * kFiringCycleNs;
       azimuths_[curr_col_] = azimuth + half_azimuth_gap * iseq;
 
-      const auto& seq = block.sequences[iseq];
+      const auto &seq = block.sequences[iseq];
       // for each laser beam, 16
       for (int lid = 0; lid < kFiringsPerSequence; ++lid) {
-        const auto& point = seq.points[lid];
-        auto& v = image_.at<cv::Vec3f>(LaserId2Row(lid), curr_col_);
-        v[RANGE] = point.distance * kDistanceResolution;
-        v[INTENSITY] = point.reflectivity;
+        const auto &point = seq.points[lid];
+        auto &v = image_.at<cv::Vec3f>(LaserId2Row(lid), curr_col_);
+        v[cloud::RANGE] = point.distance * kDistanceResolution;
+        v[cloud::INTENSITY] = point.reflectivity;
         const auto offset = lid * kSingleFiringRatio * half_azimuth_gap +
                             iseq * half_azimuth_gap;
-        v[AZIMUTH] = azimuth + offset;
+        v[cloud::AZIMUTH] = azimuth + offset;
       }
     }
   }
 }
 
-void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
+void Decoder::PacketCb(const VelodynePacketConstPtr &packet_msg) {
   const auto start = ros::Time::now();
 
-  const auto* packet_buf =
-      reinterpret_cast<const Packet*>(&(packet_msg->data[0]));
+  const auto *packet_buf =
+      reinterpret_cast<const Packet *>(&(packet_msg->data[0]));
   DecodeAndFill(packet_buf, packet_msg->stamp.toNSec());
 
   if (curr_col_ < config_.image_width) {
@@ -329,7 +218,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   cinfo_msg->height = image_msg->height;
   cinfo_msg->width = image_msg->width;
   cinfo_msg->distortion_model = "VLP16";
-  cinfo_msg->K[0] = kFiringCycleNs;  // delta time between two measurements
+  cinfo_msg->K[0] = kFiringCycleNs; // delta time between two measurements
 
   // D = [altitude, azimuth]
   cinfo_msg->D = elevations_;
@@ -341,7 +230,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   }
 
   if (cloud_pub_.getNumSubscribers() > 0) {
-    cloud_pub_.publish(ToCloud(image_msg, *cinfo_msg, false));
+    cloud_pub_.publish(cloud::ToCloud(image_msg, *cinfo_msg, false));
   }
 
   if (range_pub_.getNumSubscribers() > 0 ||
@@ -350,14 +239,14 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
     cv::Mat sep[3];
     cv::split(image_, sep);
 
-    cv::Mat range = sep[RANGE];
+    cv::Mat range = sep[cloud::RANGE];
     // should be 2, use 3 for more contrast
     range.convertTo(range, CV_8UC1, 3.0);
     range_pub_.publish(
         cv_bridge::CvImage(header, image_encodings::MONO8, range).toImageMsg());
 
     // use 300 for more contrast
-    cv::Mat intensity = sep[INTENSITY];
+    cv::Mat intensity = sep[cloud::INTENSITY];
     double a, b;
     cv::minMaxIdx(intensity, &a, &b);
     intensity.convertTo(intensity, CV_8UC1, 255 / (b - a), 255 * a / (a - b));
@@ -371,7 +260,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   ROS_DEBUG("Time: %f", (ros::Time::now() - start).toSec());
 }
 
-void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
+void Decoder::ConfigCb(VelodynePuckConfig &config, int level) {
   config.image_width /= kSequencesPerPacket;
   config.image_width *= kSequencesPerPacket;
 
@@ -395,17 +284,17 @@ void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
 
 void Decoder::Reset() {
   curr_col_ = 0;
-  image_ = cv::Mat(
-      kFiringsPerSequence, config_.image_width, CV_32FC3, cv::Scalar(kNaNF));
+  image_ = cv::Mat(kFiringsPerSequence, config_.image_width, CV_32FC3,
+                   cv::Scalar(kNaNF));
   azimuths_.clear();
   azimuths_.resize(config_.image_width, kNaND);
   timestamps_.clear();
   timestamps_.resize(config_.image_width, 0);
 }
 
-}  // namespace velodyne_puck
+} // namespace velodyne_puck
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   ros::init(argc, argv, "velodyne_puck_decoder");
   ros::NodeHandle pnh("~");
 
