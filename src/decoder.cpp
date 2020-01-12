@@ -340,13 +340,9 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
     camera_pub_.publish(image_msg, cinfo_msg);
   }
 
-  //  if (cloud_pub_.getNumSubscribers() > 0 ) {
-  {
-    const auto start = ros::Time::now();
+  if (cloud_pub_.getNumSubscribers() > 0) {
     cloud_pub_.publish(ToCloud(image_msg, *cinfo_msg, false));
-    ROS_INFO("high prec: %f", (ros::Time::now() - start).toSec());
   }
-  //  }
 
   if (range_pub_.getNumSubscribers() > 0 ||
       intensity_pub_.getNumSubscribers() > 0) {
