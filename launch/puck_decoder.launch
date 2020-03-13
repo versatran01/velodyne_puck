@@ -6,6 +6,10 @@
   <arg name="image_width" default="3636"/>
   <arg name="organized" default="true"/>
 
+  <arg name="debug" default="false"/>
+  <env if="$(arg debug)" name="ROSCONSOLE_CONFIG_FILE" value="$(find velodyne_puck)/launch/debug.conf"/>
+
+
   <node pkg="$(arg pkg)" type="$(arg pkg)_decoder" name="$(arg pkg)_decoder" output="screen" ns="$(arg ns_in)">
     <!-- params -->
     <param name="frame_id" type="string" value="$(arg frame_id)"/>

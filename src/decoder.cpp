@@ -231,7 +231,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
   if (cloud_pub_.getNumSubscribers() > 0) {
     const auto start = ros::Time::now();
     cloud_pub_.publish(cloud::ToCloud(image_msg, *cinfo_msg, false));
-    ROS_DEBUG("%f", (ros::Time::now() - start).toSec());
+    ROS_DEBUG("ToCloud time: %f", (ros::Time::now() - start).toSec());
   }
 
   if (range_pub_.getNumSubscribers() > 0 ||
@@ -258,7 +258,7 @@ void Decoder::PacketCb(const VelodynePacketConstPtr& packet_msg) {
 
   // Don't forget to reset
   Reset();
-  ROS_DEBUG("Time: %f", (ros::Time::now() - start).toSec());
+  ROS_DEBUG("PacketCb time: %f", (ros::Time::now() - start).toSec());
 }
 
 void Decoder::ConfigCb(VelodynePuckConfig& config, int level) {
