@@ -1,4 +1,6 @@
 #include <arpa/inet.h>
+#include <diagnostic_updater/diagnostic_updater.h>
+#include <diagnostic_updater/publisher.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -6,14 +8,12 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <velodyne_msgs/VelodynePacket.h>
+#include <velodyne_msgs/VelodyneScan.h>
+
 #include <cmath>
 
 #include "constants.h"
-
-#include <diagnostic_updater/diagnostic_updater.h>
-#include <diagnostic_updater/publisher.h>
-#include <velodyne_msgs/VelodynePacket.h>
-#include <velodyne_msgs/VelodyneScan.h>
 
 namespace velodyne_puck {
 
@@ -32,14 +32,14 @@ static constexpr double kPacketsPerSecond = 1e9 / kDelayPerPacketNs;
 
 class Driver {
  public:
-  explicit Driver(const ros::NodeHandle &pnh);
+  explicit Driver(const ros::NodeHandle& pnh);
   ~Driver();
 
   bool Poll();
 
  private:
   bool OpenUdpPort();
-  int ReadPacket(VelodynePacket &packet) const;
+  int ReadPacket(VelodynePacket& packet) const;
 
   // Ethernet relate variables
   std::string device_ip_str_;
@@ -57,7 +57,7 @@ class Driver {
   double freq_;
 };
 
-Driver::Driver(const ros::NodeHandle &pnh) : pnh_(pnh) {
+Driver::Driver(const ros::NodeHandle& pnh) : pnh_(pnh) {
   ROS_INFO("packet size: %zu", kPacketSize);
   pnh_.param("device_ip", device_ip_str_, std::string("192.168.1.201"));
   ROS_INFO("device_ip: %s", device_ip_str_.c_str());
@@ -83,9 +83,11 @@ Driver::Driver(const ros::NodeHandle &pnh) : pnh_(pnh) {
   freq_ = kPacketsPerSecond;
   ROS_INFO("expected frequency: %.3f (Hz)", freq_);
 
-  topic_diag_.reset(new TopicDiagnostic(
-      "packet", updater_, FrequencyStatusParam(&freq_, &freq_, 0.1, 100),
-      TimeStampStatusParam(-0.1, 0.1)));
+  topic_diag_.reset(
+      new TopicDiagnostic("packet",
+                          updater_,
+                          FrequencyStatusParam(&freq_, &freq_, 0.1, 100),
+                          TimeStampStatusParam(-0.1, 0.1)));
 
   // Output
   pub_packet_ = pnh_.advertise<VelodynePacket>("packet", 10);
@@ -101,8 +103,8 @@ Driver::~Driver() {
   if (close(socket_id_)) {
     ROS_INFO("Close socket %d at %s", socket_id_, device_ip_str_.c_str());
   } else {
-    ROS_ERROR("Failed to close socket %d at %s", socket_id_,
-              device_ip_str_.c_str());
+    ROS_ERROR(
+        "Failed to close socket %d at %s", socket_id_, device_ip_str_.c_str());
   }
 }
 
@@ -120,7 +122,7 @@ bool Driver::OpenUdpPort() {
   my_addr.sin_port = htons(kUdpPort);    // short, in network byte order
   my_addr.sin_addr.s_addr = INADDR_ANY;  // automatically fill in my IP
 
-  if (bind(socket_id_, (sockaddr *)&my_addr, sizeof(sockaddr)) == -1) {
+  if (bind(socket_id_, (sockaddr*)&my_addr, sizeof(sockaddr)) == -1) {
     perror("bind");  // TODO: ROS_ERROR errno
     ROS_ERROR("Failed to bind to socket %d", socket_id_);
     return false;
@@ -135,7 +137,7 @@ bool Driver::OpenUdpPort() {
   return true;
 }
 
-int Driver::ReadPacket(VelodynePacket &packet) const {
+int Driver::ReadPacket(VelodynePacket& packet) const {
   const auto time_before = ros::Time::now();
 
   struct pollfd fds[1];
@@ -188,9 +190,12 @@ int Driver::ReadPacket(VelodynePacket &packet) const {
 
     // Receive packets that should now be available from the
     // socket using a blocking read.
-    const ssize_t nbytes =
-        recvfrom(socket_id_, &packet.data[0], kPacketSize, 0,
-                 (sockaddr *)&sender_address, &sender_address_len);
+    const ssize_t nbytes = recvfrom(socket_id_,
+                                    &packet.data[0],
+                                    kPacketSize,
+                                    0,
+                                    (sockaddr*)&sender_address,
+                                    &sender_address_len);
 
     if (nbytes < 0) {
       if (errno != EWOULDBLOCK) {
@@ -249,7 +254,7 @@ bool Driver::Poll() {
 
 }  // namespace velodyne_puck
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   ros::init(argc, argv, "velodyne_puck_driver");
   ros::NodeHandle pnh("~");
 
